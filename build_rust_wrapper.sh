@@ -13,7 +13,7 @@ FOLLY_ROOT_DIR=$(pwd)
 # Scratch path is one directory up from the folly source tree
 SCRATCH_PATH="${FOLLY_ROOT_DIR}/../_folly_getdeps_scratch"
 RUST_WRAPPER_DIR="${FOLLY_ROOT_DIR}/rust_chm_wrapper"
-GETDEPS_LOG_FILE="${FOLLY_ROOT_DIR}/folly_build.log" # Log file for getdeps (now unused)
+GETDEPS_LOG_FILE="${FOLLY_ROOT_DIR}/folly_build.log" # Log file for getdeps
 RUST_BUILD_LOG_FILE="${RUST_WRAPPER_DIR}/rust_build.log"
 
 echo "========================================================================"
@@ -25,29 +25,37 @@ echo " Rust Build Log:${RUST_BUILD_LOG_FILE}"
 echo "========================================================================"
 echo "Script configuration complete."
 
-# --- Step 1: Build Folly using getdeps.py (SKIPPED) ---
-# echo "\n---> Preparing to build Folly and dependencies using getdeps.py..."
-# # Clean the log file
-# echo "---> Cleaning log file: ${GETDEPS_LOG_FILE}"
-# > "${GETDEPS_LOG_FILE}"
-#
-# # Run getdeps.py, tee output to log file and stdout
-# echo "---> Executing getdeps.py command..."
-# python3 -u "${FOLLY_ROOT_DIR}/build/fbcode_builder/getdeps.py" \
-#     --scratch-path "$SCRATCH_PATH" \
-#     build \
-#     --build-type Release \
-#     --no-tests \
-#     -v \
-#     folly 2>&1 | tee -a "${GETDEPS_LOG_FILE}"
-#
-# # Check exit status (redundant with set -e and pipefail, but explicit)
-# if [ ${PIPESTATUS[0]} -ne 0 ]; then
-#     echo "\n!!! ERROR: getdeps.py build failed. Check log: ${GETDEPS_LOG_FILE}"
-#     exit 1
-# fi
-# echo "\n---> Folly build successful."
-echo "\n---> Skipping Folly build (assuming already built in ${SCRATCH_PATH})."
+# --- Step 1: Build Folly using getdeps.py ---
+echo "\n---> Preparing to build Folly and dependencies using getdeps.py..."
+# Clean the log file
+echo "---> Cleaning log file: ${GETDEPS_LOG_FILE}"
+echo "---> Checking log file status before deletion:"
+ls -l "${GETDEPS_LOG_FILE}" || echo "---> Log file does not exist yet or cannot be accessed."
+echo "---> Deleting log file (if it exists)..."
+rm -f "${GETDEPS_LOG_FILE}"
+echo "---> Log file deleted successfully."
+
+# Run getdeps.py, tee output to log file and stdout
+echo "---> Testing date command:"
+date
+echo "---> Executing getdeps.py command at $(date)..."
+python3 -u "${FOLLY_ROOT_DIR}/build/fbcode_builder/getdeps.py" \
+    --scratch-path "$SCRATCH_PATH" \
+    build \
+    --build-type Release \
+    --no-tests \
+    -v \
+    folly 2>&1 | tee -a "${GETDEPS_LOG_FILE}"
+GETDEPS_EXIT_CODE=${PIPESTATUS[0]} # Use PIPESTATUS to get exit code of python3, not tee
+echo "---> getdeps.py command finished at $(date) with exit code: ${GETDEPS_EXIT_CODE}"
+
+# Explicitly check exit status
+if [ ${GETDEPS_EXIT_CODE} -ne 0 ]; then
+    echo "\n!!! ERROR: getdeps.py build failed with exit code ${GETDEPS_EXIT_CODE}. Check log: ${GETDEPS_LOG_FILE}"
+    exit 1
+fi
+echo "\n---> Folly build successful."
+# echo "\n---> Skipping Folly build (assuming already built in ${SCRATCH_PATH})."
 
 
 # --- Step 2: Build Rust Wrapper ---
