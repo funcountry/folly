@@ -22,6 +22,16 @@ pub struct FollyMap {
     map_ptr: cxx::UniquePtr<ffi::ConcurrentHashMapU64Opaque>,
 }
 
+// SAFETY: The underlying folly::ConcurrentHashMap is designed for concurrent
+// access. Reads (`find`) are wait-free. Writes (`insert`, `erase`) are
+// internally protected by sharded mutexes within the C++ implementation.
+// Rust code using this wrapper must still ensure proper synchronization if
+// needed (e.g., using `std::sync::Mutex` for sequences of operations like
+// in the benchmark), but the map itself can be safely sent across threads.
+unsafe impl Send for FollyMap {}
+// NOTE: We don't mark it `Sync` because direct `&FollyMap` access across
+// threads isn't intended; mutation requires `&mut` which the `Mutex` provides.
+
 impl FollyMap {
     /// Creates a new Folly ConcurrentHashMap.
     pub fn new() -> Self {
