@@ -39,17 +39,19 @@ impl FollyMap {
     }
 
     /// Inserts a key-value pair. Returns true if inserted, false if key already existed.
-    pub fn insert(&mut self, key: u64, value: u64) -> bool {
-        // Use pin_mut() to get a pinned mutable reference from UniquePtr
-        ffi::insert(self.map_ptr.pin_mut(), key, value)
+    /// Takes &self because the underlying C++ map handles concurrent writes internally.
+    pub fn insert(&self, key: u64, value: u64) -> bool {
+        // Directly call the FFI function. cxx handles the &self -> &Opaque conversion.
+        ffi::insert(&self.map_ptr, key, value)
     }
 
-    /// Finds a value by key. Returns the value if found, or a sentinel value (currently u64::MAX) if not found.
-    /// TODO: Improve return type (e.g., Option<u64>)
+    /// Finds a value by key. Returns the value if found, or None if not found.
     pub fn find(&self, key: u64) -> Option<u64> {
+        // find is const on the C++ side, so &self is fine.
         let result = ffi::find(&self.map_ptr, key);
         // Using u64::MAX as a sentinel for not found, as defined in wrapper.cpp
-        if result == u64::MAX {
+        const NOT_FOUND_SENTINEL: u64 = u64::MAX; // Match C++
+        if result == NOT_FOUND_SENTINEL {
             None
         } else {
             Some(result)
@@ -57,9 +59,10 @@ impl FollyMap {
     }
 
     /// Erases a key. Returns true if an element was erased, false otherwise.
-    pub fn erase(&mut self, key: u64) -> bool {
-        // Use pin_mut() to get a pinned mutable reference from UniquePtr
-        ffi::erase(self.map_ptr.pin_mut(), key) > 0
+    /// Takes &self because the underlying C++ map handles concurrent writes internally.
+    pub fn erase(&self, key: u64) -> bool {
+        // Directly call the FFI function. cxx handles the &self -> &Opaque conversion.
+        ffi::erase(&self.map_ptr, key) > 0
     }
 }
 
