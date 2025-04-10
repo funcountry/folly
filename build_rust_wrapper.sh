@@ -23,14 +23,17 @@ echo " Rust Wrapper:  ${RUST_WRAPPER_DIR}"
 echo " Getdeps Log:   ${GETDEPS_LOG_FILE}"
 echo " Rust Build Log:${RUST_BUILD_LOG_FILE}"
 echo "========================================================================"
+echo "Script configuration complete."
 
 # --- Step 1: Build Folly using getdeps.py ---
-echo "\n---> Building Folly and dependencies using getdeps.py..."
+echo "\n---> Preparing to build Folly and dependencies using getdeps.py..."
 # Clean the log file
+echo "---> Cleaning log file: ${GETDEPS_LOG_FILE}"
 > "${GETDEPS_LOG_FILE}"
 
 # Run getdeps.py, tee output to log file and stdout
-python3 "${FOLLY_ROOT_DIR}/build/fbcode_builder/getdeps.py" \
+echo "---> Executing getdeps.py command..."
+python3 -u "${FOLLY_ROOT_DIR}/build/fbcode_builder/getdeps.py" \
     --scratch-path "$SCRATCH_PATH" \
     build \
     --build-type Release \
