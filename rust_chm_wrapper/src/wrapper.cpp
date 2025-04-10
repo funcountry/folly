@@ -1,18 +1,9 @@
-#include "rust_chm_wrapper/include/wrapper.h" // Includes the opaque struct declaration
+#include "rust_chm_wrapper/include/wrapper.h" // Now includes the struct definition and Folly headers
 
-#include "folly/concurrency/ConcurrentHashMap.h" // Include the actual Folly header here
 #include <limits> // For sentinel value
 #include <memory> // For std::unique_ptr
 
-// Define the concrete Folly map type we are wrapping.
-using FollyMapU64 = folly::ConcurrentHashMapSIMD<uint64_t, uint64_t>;
-
-// Define the actual opaque struct that holds the map.
-struct folly_rust_wrapper::ConcurrentHashMapU64Opaque {
-    FollyMapU64 map;
-    // Constructor can take arguments for map initialization if needed
-    ConcurrentHashMapU64Opaque() : map() {}
-};
+// The struct ConcurrentHashMapU64Opaque is now defined in the header.
 
 namespace folly_rust_wrapper {
 
