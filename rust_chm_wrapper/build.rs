@@ -133,6 +133,7 @@ fn main() {
     // Link against other static dependencies if needed
 
     println!("cargo:rustc-link-lib=dylib=c++"); // Link against libc++ on macOS/system C++ std lib
+    println!("cargo:rustc-link-lib=dylib=c++abi"); // Explicitly link libc++abi for exception handling symbols
 
     // Rerun build script if C++ files or bridge definition change
     println!("cargo:rerun-if-changed=src/wrapper.cpp");
