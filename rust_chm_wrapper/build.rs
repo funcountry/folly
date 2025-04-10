@@ -18,6 +18,7 @@ fn main() {
     let mut glog_install_path = None;
     let mut gflags_install_path = None;
     let mut double_conversion_install_path = None;
+    let mut fmt_install_path = None;
 
     for entry in fs::read_dir(&base_install_path).expect("Failed to read base install directory") {
         let entry = entry.expect("Failed to read directory entry");
@@ -39,6 +40,9 @@ fn main() {
             // Accept either "double-conversion" or "double-conversion-<something>"
             } else if dir_name == "double-conversion" || dir_name.starts_with("double-conversion-") {
                 double_conversion_install_path = Some(path.clone());
+            // Accept either "fmt" or "fmt-<something>"
+            } else if dir_name == "fmt" || dir_name.starts_with("fmt-") {
+                fmt_install_path = Some(path.clone());
             }
         }
     }
@@ -48,6 +52,7 @@ fn main() {
     let glog_install_path = glog_install_path.expect("Could not find glog directory in base install path");
     let gflags_install_path = gflags_install_path.expect("Could not find gflags directory in base install path");
     let double_conversion_install_path = double_conversion_install_path.expect("Could not find double-conversion directory in base install path");
+    let fmt_install_path = fmt_install_path.expect("Could not find fmt directory in base install path");
 
 
     // Construct include and lib paths using the found directories
@@ -61,6 +66,8 @@ fn main() {
     let gflags_lib_path = gflags_install_path.join("lib");
     let double_conversion_include_path = double_conversion_install_path.join("include");
     let double_conversion_lib_path = double_conversion_install_path.join("lib");
+    let fmt_include_path = fmt_install_path.join("include");
+    let fmt_lib_path = fmt_install_path.join("lib");
 
 
     if !folly_include_path.exists() {
@@ -78,6 +85,9 @@ fn main() {
      if !double_conversion_include_path.exists() {
         panic!("double-conversion include path does not exist: {:?}", double_conversion_include_path);
     }
+     if !fmt_include_path.exists() {
+        panic!("fmt include path does not exist: {:?}", fmt_include_path);
+    }
     if !folly_lib_path.exists() {
         panic!("Folly lib path does not exist: {:?}", folly_lib_path);
     }
@@ -90,6 +100,9 @@ fn main() {
      if !double_conversion_lib_path.exists() {
         panic!("double-conversion lib path does not exist: {:?}", double_conversion_lib_path);
     }
+     if !fmt_lib_path.exists() {
+        panic!("fmt lib path does not exist: {:?}", fmt_lib_path);
+    }
 
     // 2. Compile the C++ wrapper code using cxx-build
     cxx_build::bridge("src/lib.rs") // Point to the file with the #[cxx::bridge] module
@@ -100,6 +113,7 @@ fn main() {
         .include(&glog_include_path)      // Include glog headers
         .include(&gflags_include_path)    // Include gflags headers
         .include(&double_conversion_include_path) // Include double-conversion headers
+        .include(&fmt_include_path)       // Include fmt headers
         .include("include")              // Include our own wrapper header
         .compile("rust_chm_wrapper_cpp"); // Library name for the compiled C++ code
 
@@ -108,12 +122,14 @@ fn main() {
     println!("cargo:rustc-link-search=native={}", glog_lib_path.display());
     println!("cargo:rustc-link-search=native={}", gflags_lib_path.display());
     println!("cargo:rustc-link-search=native={}", double_conversion_lib_path.display());
+    println!("cargo:rustc-link-search=native={}", fmt_lib_path.display());
     // Add other dependency lib paths here if needed (e.g., libevent)
 
     println!("cargo:rustc-link-lib=static=folly"); // Link against libfolly.a
     println!("cargo:rustc-link-lib=static=glog");  // Link against libglog.a
     println!("cargo:rustc-link-lib=static=gflags"); // Link against libgflags.a
     println!("cargo:rustc-link-lib=static=double-conversion"); // Link against libdouble-conversion.a
+    println!("cargo:rustc-link-lib=static=fmt"); // Link against libfmt.a
     // Link against other static dependencies if needed
 
     println!("cargo:rustc-link-lib=dylib=c++"); // Link against libc++ on macOS/system C++ std lib
