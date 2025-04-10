@@ -2,22 +2,24 @@
 mod ffi {
     // Shared types defined in C++
     unsafe extern "C++" {
+        // Include the C++ header defining the opaque type and functions
         include!("rust_chm_wrapper/include/wrapper.h");
 
-        // Opaque type for the C++ map
-        type ConcurrentHashMapU64;
+        // Opaque type for the C++ map wrapper struct
+        type ConcurrentHashMapU64Opaque;
 
-        // Functions exposed from C++
-        fn new_map() -> UniquePtr<ConcurrentHashMapU64>;
-        fn insert(map: &mut ConcurrentHashMapU64, key: u64, value: u64) -> bool;
-        fn find(map: &ConcurrentHashMapU64, key: u64) -> u64; // Returns value or sentinel (e.g., 0 or max)
-        fn erase(map: &mut ConcurrentHashMapU64, key: u64) -> usize; // Returns number of elements erased (0 or 1)
+        // Functions exposed from C++, operating on the opaque struct
+        fn new_map() -> UniquePtr<ConcurrentHashMapU64Opaque>;
+        fn insert(map: &mut ConcurrentHashMapU64Opaque, key: u64, value: u64) -> bool;
+        fn find(map: &ConcurrentHashMapU64Opaque, key: u64) -> u64; // Returns value or sentinel
+        fn erase(map: &mut ConcurrentHashMapU64Opaque, key: u64) -> usize; // Returns number of elements erased (0 or 1)
     }
 }
 
 // Public Rust struct that wraps the C++ map pointer
 pub struct FollyMap {
-    map_ptr: cxx::UniquePtr<ffi::ConcurrentHashMapU64>,
+    // Holds a pointer to the opaque C++ wrapper struct
+    map_ptr: cxx::UniquePtr<ffi::ConcurrentHashMapU64Opaque>,
 }
 
 impl FollyMap {
