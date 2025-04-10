@@ -1,0 +1,13 @@
+[package]
+name = "rust_chm_wrapper"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["lib", "staticlib"] # staticlib allows linking from other C/C++ if needed
+
+[dependencies]
+cxx = "1.0"
+
+[build-dependencies]
+cxx-build = "1.0"
