@@ -135,6 +135,14 @@ fn main() {
     println!("cargo:rustc-link-lib=dylib=c++"); // Link against libc++ on macOS/system C++ std lib
     println!("cargo:rustc-link-lib=dylib=c++abi"); // Explicitly link libc++abi for exception handling symbols
 
+    // Add rpath to ensure the executable can find the dynamic libraries at runtime
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", folly_lib_path.display());
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", glog_lib_path.display());
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", gflags_lib_path.display());
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", double_conversion_lib_path.display());
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", fmt_lib_path.display());
+    // Add rpaths for other dynamic dependencies if needed
+
     // Rerun build script if C++ files or bridge definition change
     println!("cargo:rerun-if-changed=src/wrapper.cpp");
     println!("cargo:rerun-if-changed=include/wrapper.h");

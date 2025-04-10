@@ -74,6 +74,9 @@ fi
     cd "${RUST_WRAPPER_DIR}" && \
     export FOLLY_GETDEPS_SCRATCH_PATH="${SCRATCH_PATH}" && \
     echo "---> FOLLY_GETDEPS_SCRATCH_PATH set to: ${FOLLY_GETDEPS_SCRATCH_PATH} (inside subshell)" && \
+    echo "---> Cleaning Rust target directory..." && \
+    cargo clean && \
+    echo "---> Building Rust wrapper with cargo..." && \
     cargo build
 ) 2>&1 | tee -a "${RUST_BUILD_LOG_FILE}"
 
