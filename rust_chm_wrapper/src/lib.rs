@@ -10,9 +10,9 @@ mod ffi {
 
         // Functions exposed from C++, operating on the opaque struct
         fn new_map() -> UniquePtr<ConcurrentHashMapU64Opaque>;
-        fn insert(map: &mut ConcurrentHashMapU64Opaque, key: u64, value: u64) -> bool;
+        fn insert(map: Pin<&mut ConcurrentHashMapU64Opaque>, key: u64, value: u64) -> bool;
         fn find(map: &ConcurrentHashMapU64Opaque, key: u64) -> u64; // Returns value or sentinel
-        fn erase(map: &mut ConcurrentHashMapU64Opaque, key: u64) -> usize; // Returns number of elements erased (0 or 1)
+        fn erase(map: Pin<&mut ConcurrentHashMapU64Opaque>, key: u64) -> usize; // Returns number of elements erased (0 or 1)
     }
 }
 
@@ -32,7 +32,8 @@ impl FollyMap {
 
     /// Inserts a key-value pair. Returns true if inserted, false if key already existed.
     pub fn insert(&mut self, key: u64, value: u64) -> bool {
-        ffi::insert(&mut self.map_ptr, key, value)
+        // Use pin_mut() to get a pinned mutable reference from UniquePtr
+        ffi::insert(self.map_ptr.pin_mut(), key, value)
     }
 
     /// Finds a value by key. Returns the value if found, or a sentinel value (currently u64::MAX) if not found.
@@ -49,7 +50,8 @@ impl FollyMap {
 
     /// Erases a key. Returns true if an element was erased, false otherwise.
     pub fn erase(&mut self, key: u64) -> bool {
-        ffi::erase(&mut self.map_ptr, key) > 0
+        // Use pin_mut() to get a pinned mutable reference from UniquePtr
+        ffi::erase(self.map_ptr.pin_mut(), key) > 0
     }
 }
 
