@@ -1,5 +1,6 @@
 use std::env;
 use std::path::PathBuf;
+use std::fs;
 
 fn main() {
     // 1. Get Folly installation path from environment variable
@@ -7,13 +8,33 @@ fn main() {
         .expect("FOLLY_GETDEPS_SCRATCH_PATH environment variable not set. Run this via the build_rust_wrapper.sh script or set it manually.");
     let base_install_path = PathBuf::from(folly_scratch_path).join("installed");
 
-    // Folly paths
-    let folly_install_path = base_install_path.join("folly");
+    if !base_install_path.exists() {
+        panic!("Base install path does not exist: {:?}", base_install_path);
+    }
+
+    // Dynamically find folly-* and boost-* directories
+    let mut folly_install_path = None;
+    let mut boost_install_path = None;
+
+    for entry in fs::read_dir(&base_install_path).expect("Failed to read base install directory") {
+        let entry = entry.expect("Failed to read directory entry");
+        let path = entry.path();
+        if path.is_dir() {
+            let dir_name = path.file_name().unwrap().to_string_lossy();
+            if dir_name.starts_with("folly-") {
+                folly_install_path = Some(path.clone());
+            } else if dir_name.starts_with("boost-") {
+                boost_install_path = Some(path.clone());
+            }
+        }
+    }
+
+    let folly_install_path = folly_install_path.expect("Could not find folly-* directory in base install path");
+    let boost_install_path = boost_install_path.expect("Could not find boost-* directory in base install path");
+
+    // Construct include and lib paths using the found directories
     let folly_include_path = folly_install_path.join("include");
     let folly_lib_path = folly_install_path.join("lib");
-
-    // Boost paths (assuming Boost is also installed via getdeps.py)
-    let boost_install_path = base_install_path.join("boost");
     let boost_include_path = boost_install_path.join("include");
 
     if !folly_include_path.exists() {
@@ -30,8 +51,8 @@ fn main() {
     cxx_build::bridge("src/lib.rs") // Point to the file with the #[cxx::bridge] module
         .file("src/wrapper.cpp")
         .flag_if_supported("-std=c++17") // Folly requires C++17
-        .include(folly_include_path)     // Include Folly headers
-        .include(boost_include_path)     // Include Boost headers
+        .include(&folly_include_path)     // Include Folly headers
+        .include(&boost_include_path)     // Include Boost headers
         .include("include")              // Include our own wrapper header
         .compile("rust_chm_wrapper_cpp"); // Library name for the compiled C++ code
 
