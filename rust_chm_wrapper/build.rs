@@ -18,7 +18,7 @@ fn main() {
     }
 
     // 2. Compile the C++ wrapper code using cxx-build
-    cxx_build::bridge("src/bridge.rs") // Compiles the C++ files specified below
+    cxx_build::bridge("src/lib.rs") // Point to the file with the #[cxx::bridge] module
         .file("src/wrapper.cpp")
         .flag_if_supported("-std=c++17") // Folly requires C++17
         .include(folly_include_path)     // Include Folly headers
@@ -34,5 +34,5 @@ fn main() {
     // Rerun build script if C++ files or bridge definition change
     println!("cargo:rerun-if-changed=src/wrapper.cpp");
     println!("cargo:rerun-if-changed=include/wrapper.h");
-    println!("cargo:rerun-if-changed=src/bridge.rs");
+    println!("cargo:rerun-if-changed=src/lib.rs"); // Update to lib.rs
 }

@@ -1,31 +1,8 @@
 #pragma once
 
-#include <memory> // For std::unique_ptr
+#pragma once
 
-// Forward declare the actual Folly map template specialization
-namespace folly {
-template <
-    typename KeyType,
-    typename ValueType,
-    typename HashFn,
-    typename KeyEqual,
-    typename Allocator,
-    uint8_t ShardBits,
-    template <typename> class Atom,
-    class Mutex,
-    template <
-        typename,
-        typename,
-        uint8_t,
-        typename,
-        typename,
-        typename,
-        template <typename>
-        class,
-        class>
-    class Impl>
-class ConcurrentHashMap;
-} // namespace folly
+#include <memory> // For std::unique_ptr
 
 // Define the specific type we are wrapping for CXX
 // We use uint64_t for simplicity here. Adjust as needed.
