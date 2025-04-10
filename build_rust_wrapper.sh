@@ -35,6 +35,7 @@ python3 "${FOLLY_ROOT_DIR}/build/fbcode_builder/getdeps.py" \
     build \
     --build-type Release \
     --no-tests \
+    -v \
     folly 2>&1 | tee -a "${GETDEPS_LOG_FILE}"
 
 # Check exit status (redundant with set -e and pipefail, but explicit)
