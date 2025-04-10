@@ -61,12 +61,15 @@ fi
 > "${RUST_BUILD_LOG_FILE}"
 
 # Set environment variable for build.rs
-export FOLLY_GETDEPS_SCRATCH_PATH="${SCRATCH_PATH}"
+# Set environment variable for build.rs and run cargo build inside a subshell
+(
+    cd "${RUST_WRAPPER_DIR}" && \
+    export FOLLY_GETDEPS_SCRATCH_PATH="${SCRATCH_PATH}" && \
+    echo "---> FOLLY_GETDEPS_SCRATCH_PATH set to: ${FOLLY_GETDEPS_SCRATCH_PATH} (inside subshell)" && \
+    cargo build
+) 2>&1 | tee -a "${RUST_BUILD_LOG_FILE}"
 
-# Run cargo build from the wrapper directory, tee output
-(cd "${RUST_WRAPPER_DIR}" && cargo build) 2>&1 | tee -a "${RUST_BUILD_LOG_FILE}"
-
-# Check exit status
+# Check exit status of the subshell/cargo build
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
     echo "\n!!! ERROR: cargo build failed. Check log: ${RUST_BUILD_LOG_FILE}"
     exit 1
