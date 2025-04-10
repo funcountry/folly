@@ -125,11 +125,11 @@ fn main() {
     println!("cargo:rustc-link-search=native={}", fmt_lib_path.display());
     // Add other dependency lib paths here if needed (e.g., libevent)
 
-    println!("cargo:rustc-link-lib=static=folly"); // Link against libfolly.a
-    println!("cargo:rustc-link-lib=static=glog");  // Link against libglog.a
-    println!("cargo:rustc-link-lib=static=gflags"); // Link against libgflags.a
-    println!("cargo:rustc-link-lib=static=double-conversion"); // Link against libdouble-conversion.a
-    println!("cargo:rustc-link-lib=static=fmt"); // Link against libfmt.a
+    println!("cargo:rustc-link-lib=static=folly"); // Link against libfolly.a (usually static)
+    println!("cargo:rustc-link-lib=dylib=glog");  // Link against libglog.dylib
+    println!("cargo:rustc-link-lib=dylib=gflags"); // Link against libgflags.dylib
+    println!("cargo:rustc-link-lib=dylib=double-conversion"); // Link against libdouble-conversion.dylib
+    println!("cargo:rustc-link-lib=dylib=fmt"); // Link against libfmt.dylib
     // Link against other static dependencies if needed
 
     println!("cargo:rustc-link-lib=dylib=c++"); // Link against libc++ on macOS/system C++ std lib
