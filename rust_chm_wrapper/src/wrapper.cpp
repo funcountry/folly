@@ -17,9 +17,11 @@ std::unique_ptr<ConcurrentHashMapU64Opaque> new_map() {
     return std::make_unique<ConcurrentHashMapU64Opaque>();
 }
 
-bool insert(ConcurrentHashMapU64Opaque& wrapper, uint64_t key, uint64_t value) {
+// Note: Parameter is const&, but we use const_cast because the underlying
+// folly::CHM::insert is thread-safe despite logically modifying the map.
+bool insert(const ConcurrentHashMapU64Opaque& wrapper, uint64_t key, uint64_t value) {
     // Access the map inside the wrapper and call its insert method
-    return wrapper.map.insert(key, value).second;
+    return const_cast<ConcurrentHashMapU64Opaque&>(wrapper).map.insert(key, value).second;
 }
 
 uint64_t find(const ConcurrentHashMapU64Opaque& wrapper, uint64_t key) {
@@ -32,9 +34,11 @@ uint64_t find(const ConcurrentHashMapU64Opaque& wrapper, uint64_t key) {
     return it->second;
 }
 
-size_t erase(ConcurrentHashMapU64Opaque& wrapper, uint64_t key) {
+// Note: Parameter is const&, but we use const_cast because the underlying
+// folly::CHM::erase is thread-safe despite logically modifying the map.
+size_t erase(const ConcurrentHashMapU64Opaque& wrapper, uint64_t key) {
     // Access the map inside the wrapper and call its erase method
-    return wrapper.map.erase(key);
+    return const_cast<ConcurrentHashMapU64Opaque&>(wrapper).map.erase(key);
 }
 
 } // namespace folly_rust_wrapper

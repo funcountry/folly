@@ -10,9 +10,10 @@ mod ffi {
 
         // Functions exposed from C++, operating on the opaque struct
         fn new_map() -> UniquePtr<ConcurrentHashMapU64Opaque>;
-        fn insert(map: Pin<&mut ConcurrentHashMapU64Opaque>, key: u64, value: u64) -> bool;
+        // Declare insert/erase take &Opaque to signal thread-safety to cxx
+        fn insert(map: &ConcurrentHashMapU64Opaque, key: u64, value: u64) -> bool;
         fn find(map: &ConcurrentHashMapU64Opaque, key: u64) -> u64; // Returns value or sentinel
-        fn erase(map: Pin<&mut ConcurrentHashMapU64Opaque>, key: u64) -> usize; // Returns number of elements erased (0 or 1)
+        fn erase(map: &ConcurrentHashMapU64Opaque, key: u64) -> usize; // Returns number of elements erased (0 or 1)
     }
 }
 
@@ -24,13 +25,10 @@ pub struct FollyMap {
 
 // SAFETY: The underlying folly::ConcurrentHashMap is designed for concurrent
 // access. Reads (`find`) are wait-free. Writes (`insert`, `erase`) are
-// internally protected by sharded mutexes within the C++ implementation.
-// Rust code using this wrapper must still ensure proper synchronization if
-// needed (e.g., using `std::sync::Mutex` for sequences of operations like
-// in the benchmark), but the map itself can be safely sent across threads.
+// internally protected. FollyMap can be safely sent (`Send`) and accessed
+// concurrently via shared references (`Sync`).
 unsafe impl Send for FollyMap {}
-// NOTE: We don't mark it `Sync` because direct `&FollyMap` access across
-// threads isn't intended; mutation requires `&mut` which the `Mutex` provides.
+unsafe impl Sync for FollyMap {} // Mark as Sync as well, as &FollyMap access is safe
 
 impl FollyMap {
     /// Creates a new Folly ConcurrentHashMap.
