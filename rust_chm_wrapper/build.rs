@@ -21,9 +21,11 @@ fn main() {
         let path = entry.path();
         if path.is_dir() {
             let dir_name = path.file_name().unwrap().to_string_lossy();
-            if dir_name.starts_with("folly-") {
+            // Accept either "folly" or "folly-<something>"
+            if dir_name == "folly" || dir_name.starts_with("folly-") {
                 folly_install_path = Some(path.clone());
-            } else if dir_name.starts_with("boost-") {
+            // Accept either "boost" or "boost-<something>" (though boost usually has version/hash)
+            } else if dir_name == "boost" || dir_name.starts_with("boost-") {
                 boost_install_path = Some(path.clone());
             }
         }
