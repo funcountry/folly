@@ -5,13 +5,22 @@ fn main() {
     // 1. Get Folly installation path from environment variable
     let folly_scratch_path = env::var("FOLLY_GETDEPS_SCRATCH_PATH")
         .expect("FOLLY_GETDEPS_SCRATCH_PATH environment variable not set. Run this via the build_rust_wrapper.sh script or set it manually.");
-    let folly_install_path = PathBuf::from(folly_scratch_path).join("installed").join("folly");
+    let base_install_path = PathBuf::from(folly_scratch_path).join("installed");
 
+    // Folly paths
+    let folly_install_path = base_install_path.join("folly");
     let folly_include_path = folly_install_path.join("include");
     let folly_lib_path = folly_install_path.join("lib");
 
+    // Boost paths (assuming Boost is also installed via getdeps.py)
+    let boost_install_path = base_install_path.join("boost");
+    let boost_include_path = boost_install_path.join("include");
+
     if !folly_include_path.exists() {
         panic!("Folly include path does not exist: {:?}", folly_include_path);
+    }
+    if !boost_include_path.exists() {
+        panic!("Boost include path does not exist: {:?}. Ensure Boost was built by getdeps.py in the same scratch path.", boost_include_path);
     }
     if !folly_lib_path.exists() {
         panic!("Folly lib path does not exist: {:?}", folly_lib_path);
@@ -22,6 +31,7 @@ fn main() {
         .file("src/wrapper.cpp")
         .flag_if_supported("-std=c++17") // Folly requires C++17
         .include(folly_include_path)     // Include Folly headers
+        .include(boost_include_path)     // Include Boost headers
         .include("include")              // Include our own wrapper header
         .compile("rust_chm_wrapper_cpp"); // Library name for the compiled C++ code
 
