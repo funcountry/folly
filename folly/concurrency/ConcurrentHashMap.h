@@ -577,6 +577,26 @@ class ConcurrentHashMap {
     }
   }
 
+  /*
+   * Atomically assigns `new_value` to the key `k`.
+   * If the key already exists, its value is updated, and the *previous* value is returned.
+   * If the key does not exist, it is inserted, and NOT_FOUND_SENTINEL is returned.
+   *
+   * NOTE: This method assumes ValueType is uintptr_t or similar integral type
+   *       where NOT_FOUND_SENTINEL is a distinguishable invalid value.
+   */
+  template <typename Key>
+  ValueType insert_or_assign_and_get_old(Key&& k, ValueType new_value) {
+    static_assert(std::is_integral<ValueType>::value && sizeof(ValueType) == sizeof(uintptr_t),
+                  "ValueType must be uintptr_t or equivalent for insert_or_assign_and_get_old");
+    auto h = HashFn{}(k);
+    auto segment_idx = pickSegment(h);
+    // Ensure the segment exists before calling its method.
+    // The segment method itself will handle the core logic including locking.
+    return ensureSegment(segment_idx)->insert_or_assign_and_get_old(h, std::forward<Key>(k), new_value);
+  }
+
+
   class ConstIterator {
    public:
     friend class ConcurrentHashMap;
