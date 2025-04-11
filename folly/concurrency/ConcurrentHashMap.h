@@ -27,6 +27,10 @@
 
 namespace folly {
 
+// Define a sentinel value for insert_or_assign_and_get_old.
+// Using UINTPTR_MAX is generally safe as valid pointers are unlikely to have this value.
+constexpr uintptr_t kConcurrentHashMapNotFoundSentinel = std::numeric_limits<uintptr_t>::max();
+
 /**
  * Implementations of high-performance Concurrent Hashmaps that
  * support erase and update.
