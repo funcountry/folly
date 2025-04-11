@@ -21,6 +21,7 @@
 #include <mutex>
 #include <new>
 
+#include <folly/concurrency/detail/ConcurrentHashMapConstants.h> // Include the new header
 #include <folly/container/HeterogeneousAccess.h>
 #include <folly/container/detail/F14Mask.h>
 #include <folly/lang/Exception.h>
@@ -775,7 +776,82 @@ class alignas(64) BucketTable {
   alignas(64) Atom<Buckets*> buckets_{nullptr};
   std::atomic<uint64_t> seqlock_{0};
   Atom<size_t> bucket_count_;
-};
+
+ public: // <-- Add public access specifier here
+  // --- Implementation for insert_or_assign_and_get_old ---
+  template <typename Key>
+  ValueType insert_or_assign_and_get_old(
+      size_t h, Key&& k, ValueType new_value, hazptr_obj_cohort<Atom>* cohort) {
+    std::unique_lock<Mutex> g(m_);
+
+    size_t bcount = bucket_count_.load(std::memory_order_relaxed);
+    auto buckets = buckets_.load(std::memory_order_relaxed);
+
+    // Check for potential rehash needed before insertion
+    if (size() >= load_factor_nodes_) {
+      if (max_size_ && size() << 1 > max_size_) {
+        throw_exception<std::bad_alloc>(); // Would exceed max size
+      }
+      rehash(bcount << 1, cohort);
+      buckets = buckets_.load(std::memory_order_relaxed); // Reload after rehash
+      bcount = bucket_count_.load(std::memory_order_relaxed);
+    }
+
+    DCHECK(buckets) << "Use-after-destruction by user.";
+    auto idx = getIdx(bcount, h);
+    auto head = &buckets->buckets_[idx]();
+    auto node = head->load(std::memory_order_relaxed);
+    Node* prev_node_ptr = nullptr; // Keep track of the previous node for replacement
+
+    while (node) {
+      if (KeyEqual()(k, node->getItem().first)) {
+        // Key found - perform assignment and return old value
+        ValueType old_value = node->getItem().second;
+
+        // Create the new node to replace the old one
+        auto new_node = (Node*)Allocator().allocate(sizeof(Node));
+        // Use the provided key `k` and the `new_value`
+        new (new_node) Node(cohort, std::forward<Key>(k), new_value);
+
+        // Link the new node into the chain
+        auto next_node = node->next_.load(std::memory_order_relaxed);
+        new_node->next_.store(next_node, std::memory_order_relaxed);
+        if (next_node) {
+          next_node->acquire_link(); // Acquire link for the next node
+        }
+
+        // Update the previous node's next pointer or the bucket head
+        if (prev_node_ptr) {
+          prev_node_ptr->next_.store(new_node, std::memory_order_release);
+        } else {
+          head->store(new_node, std::memory_order_release);
+        }
+
+        // Unlock before releasing the old node
+        g.unlock();
+        node->release(); // Retire the old node using hazptr
+
+        return old_value;
+      }
+      prev_node_ptr = node;
+      node = node->next_.load(std::memory_order_relaxed);
+    }
+
+    // Key not found - perform insertion and return sentinel
+    incSize();
+    auto new_node = (Node*)Allocator().allocate(sizeof(Node));
+    // Use the provided key `k` and the `new_value`
+    new (new_node) Node(cohort, std::forward<Key>(k), new_value);
+
+    // Insert at head
+    auto headnode = head->load(std::memory_order_relaxed);
+    new_node->next_.store(headnode, std::memory_order_relaxed);
+    head->store(new_node, std::memory_order_release);
+
+    // No need to unlock here as we are returning
+    return folly::kConcurrentHashMapNotFoundSentinel;
+  }
+}; // BucketTable
 
 } // namespace bucket
 
@@ -1630,7 +1706,67 @@ class alignas(64) SIMDTable {
   alignas(64) Atom<Chunks*> chunks_{nullptr};
   std::atomic<uint64_t> seqlock_{0};
   Atom<size_t> chunk_count_;
-};
+
+ public: // <-- Add public access specifier here
+  // --- Implementation for insert_or_assign_and_get_old ---
+  template <typename Key>
+  ValueType insert_or_assign_and_get_old(
+      size_t h, Key&& k, ValueType new_value, hazptr_obj_cohort<Atom>* cohort) {
+    const HashPair hp = splitHash(h);
+    std::unique_lock<Mutex> g(m_);
+
+    size_t ccount = chunk_count_.load(std::memory_order_relaxed);
+    auto chunks = chunks_.load(std::memory_order_relaxed);
+
+    // Check for potential rehash needed before insertion
+    if (size() >= grow_threshold_) {
+      if (max_size_ && size() << 1 > max_size_) {
+        throw_exception<std::bad_alloc>(); // Would exceed max size
+      }
+      rehash_internal(ccount << 1, cohort);
+      chunks = chunks_.load(std::memory_order_relaxed); // Reload after rehash
+      ccount = chunk_count_.load(std::memory_order_relaxed);
+    }
+
+    DCHECK(chunks) << "Use-after-destruction by user.";
+    size_t chunk_idx, tag_idx;
+    Node* node = find_internal(k, hp, chunks, ccount, chunk_idx, tag_idx);
+
+    if (node) {
+      // Key found - perform assignment and return old value
+      ValueType old_value = node->getItem().second;
+
+      // Create the new node to replace the old one
+      auto new_node = (Node*)Allocator().allocate(sizeof(Node));
+      // Use the provided key `k` and the `new_value`
+      new (new_node) Node(cohort, std::forward<Key>(k), new_value);
+
+      // Get the chunk and update the item pointer
+      Chunk* chunk = chunks->getChunk(chunk_idx, ccount);
+      chunk->item(tag_idx).store(new_node, std::memory_order_release); // Replace pointer
+
+      // Unlock before retiring the old node
+      g.unlock();
+      node->retire(); // Retire the old node using hazptr
+
+      return old_value;
+    } else {
+      // Key not found - perform insertion and return sentinel
+      incSize();
+      auto new_node = (Node*)Allocator().allocate(sizeof(Node));
+      // Use the provided key `k` and the `new_value`
+      new (new_node) Node(cohort, std::forward<Key>(k), new_value);
+
+      // Find an empty slot and insert
+      std::tie(chunk_idx, tag_idx) = findEmptyInsertLocation(chunks, ccount, hp);
+      Chunk* chunk = chunks->getChunk(chunk_idx, ccount);
+      chunk->setNodeAndTag(tag_idx, new_node, hp.second);
+
+      // No need to unlock here as we are returning
+      return folly::kConcurrentHashMapNotFoundSentinel;
+    }
+  }
+}; // SIMDTable
 } // namespace simd
 
 #endif // FOLLY_SSE_PREREQ(4, 2) && FOLLY_F14_VECTOR_INTRINSICS_AVAILABLE
@@ -1906,6 +2042,12 @@ class alignas(64) ConcurrentHashMapSegment {
   Iterator cbegin() { return impl_.cbegin(); }
 
   Iterator cend() { return impl_.cend(); }
+
+  template <typename Key>
+  ValueType insert_or_assign_and_get_old(size_t h, Key&& k, ValueType new_value) {
+      // Forward the call to the underlying implementation table (BucketTable or SIMDTable)
+      return impl_.insert_or_assign_and_get_old(h, std::forward<Key>(k), new_value, cohort_);
+  }
 
  private:
   ImplT impl_;

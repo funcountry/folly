@@ -1,0 +1,104 @@
+#[cxx::bridge(namespace = "folly_rust_wrapper")]
+mod ffi {
+    // Shared types defined in C++
+    unsafe extern "C++" {
+        // Include the C++ header defining the opaque type and functions
+        include!("rust_chm_wrapper/include/wrapper.h");
+
+        // Opaque type for the C++ map wrapper struct
+        type ConcurrentHashMapU64Opaque;
+
+        // Functions exposed from C++, operating on the opaque struct
+        fn new_map() -> UniquePtr<ConcurrentHashMapU64Opaque>;
+        // Declare insert/erase take &Opaque to signal thread-safety to cxx
+        fn insert(map: &ConcurrentHashMapU64Opaque, key: u64, value: u64) -> bool;
+        fn find(map: &ConcurrentHashMapU64Opaque, key: u64) -> u64; // Returns value or sentinel
+        fn erase(map: &ConcurrentHashMapU64Opaque, key: u64) -> usize; // Returns number of elements erased (0 or 1)
+    }
+}
+
+// Public Rust struct that wraps the C++ map pointer
+pub struct FollyMap {
+    // Holds a pointer to the opaque C++ wrapper struct
+    map_ptr: cxx::UniquePtr<ffi::ConcurrentHashMapU64Opaque>,
+}
+
+// SAFETY: The underlying folly::ConcurrentHashMap is designed for concurrent
+// access. Reads (`find`) are wait-free. Writes (`insert`, `erase`) are
+// internally protected. FollyMap can be safely sent (`Send`) and accessed
+// concurrently via shared references (`Sync`).
+unsafe impl Send for FollyMap {}
+unsafe impl Sync for FollyMap {} // Mark as Sync as well, as &FollyMap access is safe
+
+impl FollyMap {
+    /// Creates a new Folly ConcurrentHashMap.
+    pub fn new() -> Self {
+        FollyMap {
+            map_ptr: ffi::new_map(),
+        }
+    }
+
+    /// Inserts a key-value pair. Returns true if inserted, false if key already existed.
+    /// Takes &self because the underlying C++ map handles concurrent writes internally.
+    pub fn insert(&self, key: u64, value: u64) -> bool {
+        // Directly call the FFI function. cxx handles the &self -> &Opaque conversion.
+        ffi::insert(&self.map_ptr, key, value)
+    }
+
+    /// Finds a value by key. Returns the value if found, or None if not found.
+    pub fn find(&self, key: u64) -> Option<u64> {
+        // find is const on the C++ side, so &self is fine.
+        let result = ffi::find(&self.map_ptr, key);
+        // Using u64::MAX as a sentinel for not found, as defined in wrapper.cpp
+        const NOT_FOUND_SENTINEL: u64 = u64::MAX; // Match C++
+        if result == NOT_FOUND_SENTINEL {
+            None
+        } else {
+            Some(result)
+        }
+    }
+
+    /// Erases a key. Returns true if an element was erased, false otherwise.
+    /// Takes &self because the underlying C++ map handles concurrent writes internally.
+    pub fn erase(&self, key: u64) -> bool {
+        // Directly call the FFI function. cxx handles the &self -> &Opaque conversion.
+        ffi::erase(&self.map_ptr, key) > 0
+    }
+}
+
+impl Default for FollyMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// Basic tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_insert_find_erase() {
+        let mut map = FollyMap::new();
+
+        // Insert
+        assert!(map.insert(10, 100));
+        assert!(map.insert(20, 200));
+        assert!(!map.insert(10, 101)); // Key 10 already exists
+
+        // Find
+        assert_eq!(map.find(10), Some(100));
+        assert_eq!(map.find(20), Some(200));
+        assert_eq!(map.find(30), None); // Key 30 does not exist
+
+        // Erase
+        assert!(map.erase(10)); // Erase existing key
+        assert!(!map.erase(30)); // Try erasing non-existent key
+        assert_eq!(map.find(10), None); // Verify erasure
+        assert_eq!(map.find(20), Some(200)); // Verify other key still exists
+
+        // Erase remaining key
+        assert!(map.erase(20));
+        assert_eq!(map.find(20), None);
+    }
+}
