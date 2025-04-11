@@ -777,6 +777,7 @@ class alignas(64) BucketTable {
   std::atomic<uint64_t> seqlock_{0};
   Atom<size_t> bucket_count_;
 
+ public: // <-- Add public access specifier here
   // --- Implementation for insert_or_assign_and_get_old ---
   template <typename Key>
   ValueType insert_or_assign_and_get_old(
@@ -1706,6 +1707,7 @@ class alignas(64) SIMDTable {
   std::atomic<uint64_t> seqlock_{0};
   Atom<size_t> chunk_count_;
 
+ public: // <-- Add public access specifier here
   // --- Implementation for insert_or_assign_and_get_old ---
   template <typename Key>
   ValueType insert_or_assign_and_get_old(
