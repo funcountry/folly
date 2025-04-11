@@ -847,7 +847,7 @@ class alignas(64) BucketTable {
     head->store(new_node, std::memory_order_release);
 
     // No need to unlock here as we are returning
-    return ConcurrentHashMap<KeyType, ValueType, HashFn, KeyEqual, Allocator, ShardBits, Atom, Mutex>::NOT_FOUND_SENTINEL;
+    return folly::kConcurrentHashMapNotFoundSentinel;
   }
 }; // BucketTable
 
@@ -1760,7 +1760,7 @@ class alignas(64) SIMDTable {
       chunk->setNodeAndTag(tag_idx, new_node, hp.second);
 
       // No need to unlock here as we are returning
-      return ConcurrentHashMap<KeyType, ValueType, HashFn, KeyEqual, Allocator, ShardBits, Atom, Mutex>::NOT_FOUND_SENTINEL;
+      return folly::kConcurrentHashMapNotFoundSentinel;
     }
   }
 }; // SIMDTable

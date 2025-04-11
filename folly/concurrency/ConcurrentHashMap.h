@@ -164,9 +164,6 @@ class ConcurrentHashMap {
   float load_factor_ = SegmentT::kDefaultLoadFactor;
 
   static constexpr uint64_t NumShards = (1 << ShardBits);
-  // Define a sentinel value for the new function.
-  // Using UINTPTR_MAX is generally safe as valid pointers are unlikely to have this value.
-  static constexpr uintptr_t NOT_FOUND_SENTINEL = std::numeric_limits<uintptr_t>::max();
 
 
  public:
