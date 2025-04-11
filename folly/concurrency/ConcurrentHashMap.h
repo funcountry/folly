@@ -19,6 +19,8 @@
 #include <atomic>
 #include <mutex>
 
+#include <limits> // For numeric_limits
+
 #include <folly/Optional.h>
 #include <folly/concurrency/detail/ConcurrentHashMap-detail.h>
 #include <folly/synchronization/Hazptr.h>
@@ -162,12 +164,19 @@ class ConcurrentHashMap {
   float load_factor_ = SegmentT::kDefaultLoadFactor;
 
   static constexpr uint64_t NumShards = (1 << ShardBits);
+  // Define a sentinel value for the new function.
+  // Using UINTPTR_MAX is generally safe as valid pointers are unlikely to have this value.
+  static constexpr uintptr_t NOT_FOUND_SENTINEL = std::numeric_limits<uintptr_t>::max();
+
 
  public:
   class ConstIterator;
 
   typedef KeyType key_type;
-  typedef ValueType mapped_type;
+  // Ensure ValueType is uintptr_t for this specific use case if uncommented,
+  // otherwise trust the user is instantiating correctly.
+  // static_assert(std::is_same<ValueType, uintptr_t>::value, "ValueType must be uintptr_t for insert_or_assign_and_get_old");
+  typedef ValueType mapped_type; // Should be uintptr_t for the target use case
   typedef std::pair<const KeyType, ValueType> value_type;
   typedef std::size_t size_type;
   typedef HashFn hasher;
@@ -732,8 +741,9 @@ class ConcurrentHashMap {
     if (!seg) {
       auto b = ensureCohort();
       SegmentT* newseg = SegmentTAllocator().allocate(1);
+      // Pass the map's load factor and max size per segment
       newseg = new (newseg)
-          SegmentT(size_ >> ShardBits, load_factor_, max_size_ >> ShardBits, b);
+          SegmentT(size_ >> ShardBits, load_factor_, max_size_ == 0 ? 0 : max_size_ >> ShardBits, b);
       if (!segments_[i].compare_exchange_strong(seg, newseg)) {
         // seg is updated with new value, delete ours.
         newseg->~SegmentT();
