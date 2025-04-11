@@ -19,17 +19,17 @@
 #include <atomic>
 #include <mutex>
 
-#include <limits> // For numeric_limits
+// #include <limits> // No longer needed here directly
+#include <cstdint> // For uintptr_t usage in static_assert
 
 #include <folly/Optional.h>
 #include <folly/concurrency/detail/ConcurrentHashMap-detail.h>
+#include <folly/concurrency/detail/ConcurrentHashMapConstants.h> // Include the new header
 #include <folly/synchronization/Hazptr.h>
 
 namespace folly {
 
-// Define a sentinel value for insert_or_assign_and_get_old.
-// Using UINTPTR_MAX is generally safe as valid pointers are unlikely to have this value.
-constexpr uintptr_t kConcurrentHashMapNotFoundSentinel = std::numeric_limits<uintptr_t>::max();
+// Sentinel definition moved to ConcurrentHashMapConstants.h
 
 /**
  * Implementations of high-performance Concurrent Hashmaps that

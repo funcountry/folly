@@ -21,6 +21,7 @@
 #include <mutex>
 #include <new>
 
+#include <folly/concurrency/detail/ConcurrentHashMapConstants.h> // Include the new header
 #include <folly/container/HeterogeneousAccess.h>
 #include <folly/container/detail/F14Mask.h>
 #include <folly/lang/Exception.h>
