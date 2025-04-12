@@ -731,7 +731,6 @@ class alignas(64) BucketTable {
           prev->store(cur, std::memory_order_release);
           it.setNode(cur, buckets, bcount, idx);
           haznode.reset_protection(cur);
-          g.unlock();
 
 		  // AE - 4/12
 		  // Important only release the node if we DID NOT capture it
@@ -740,6 +739,7 @@ class alignas(64) BucketTable {
 		  if (!out_replaced_node) {
             node->release();
           }
+          g.unlock();
 
 		  // AE - 4/12
 		  // Otherwise the *out_replaced_node now holds the poitner to the old node
@@ -1737,61 +1737,8 @@ class alignas(64) SIMDTable {
   template <typename Key>
   ValueType insert_or_assign_and_get_old(
       size_t h, Key&& k, ValueType new_value, hazptr_obj_cohort<Atom>* cohort) {
-    const HashPair hp = splitHash(h);
-    std::unique_lock<Mutex> g(m_);
-
-    size_t ccount = chunk_count_.load(std::memory_order_relaxed);
-    auto chunks = chunks_.load(std::memory_order_relaxed);
-
-    // Check for potential rehash needed before insertion
-    if (size() >= grow_threshold_) {
-      if (max_size_ && size() << 1 > max_size_) {
-        throw_exception<std::bad_alloc>(); // Would exceed max size
-      }
-      rehash_internal(ccount << 1, cohort);
-      chunks = chunks_.load(std::memory_order_relaxed); // Reload after rehash
-      ccount = chunk_count_.load(std::memory_order_relaxed);
-    }
-
-    DCHECK(chunks) << "Use-after-destruction by user.";
-    size_t chunk_idx, tag_idx;
-    Node* node = find_internal(k, hp, chunks, ccount, chunk_idx, tag_idx);
-
-    if (node) {
-      // Key found - perform assignment and return old value
-      ValueType old_value = node->getItem().second;
-
-      // Create the new node to replace the old one
-      auto new_node = (Node*)Allocator().allocate(sizeof(Node));
-      // Use the provided key `k` and the `new_value`
-      new (new_node) Node(cohort, std::forward<Key>(k), new_value);
-
-      // Get the chunk and update the item pointer
-      Chunk* chunk = chunks->getChunk(chunk_idx, ccount);
-      chunk->item(tag_idx).store(
-          new_node, std::memory_order_release); // Replace pointer
-
-      // Unlock before retiring the old node
-      g.unlock();
-      node->retire(); // Retire the old node using hazptr
-
-      return old_value;
-    } else {
-      // Key not found - perform insertion and return sentinel
-      incSize();
-      auto new_node = (Node*)Allocator().allocate(sizeof(Node));
-      // Use the provided key `k` and the `new_value`
-      new (new_node) Node(cohort, std::forward<Key>(k), new_value);
-
-      // Find an empty slot and insert
-      std::tie(chunk_idx, tag_idx) =
-          findEmptyInsertLocation(chunks, ccount, hp);
-      Chunk* chunk = chunks->getChunk(chunk_idx, ccount);
-      chunk->setNodeAndTag(tag_idx, new_node, hp.second);
-
-      // No need to unlock here as we are returning
-      return folly::kConcurrentHashMapNotFoundSentinel;
-    }
+		// AE - 4/12 -  NOT IMPLEMENTED
+		throw std::runtime_error("insert_or_assign_and_get_old not implemented");
   }
 }; // SIMDTable
 } // namespace simd
