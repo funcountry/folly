@@ -2005,7 +2005,7 @@ class alignas(64) ConcurrentHashMapSegment {
       MatchFunc match,
       Args&&... args) {
     return impl_.insert(
-        it, h, k, type, match, cohort_, std::forward<Args>(args)...);
+        it, h, k, type, match, cohort_, nullptr, std::forward<Args>(args)...);
   }
 
   template <typename MatchFunc, typename K, typename... Args>
@@ -2016,7 +2016,7 @@ class alignas(64) ConcurrentHashMapSegment {
       InsertType type,
       MatchFunc match,
       Node* cur) {
-    return impl_.insert(it, h, k, type, match, cur, cohort_);
+    return impl_.insert(it, h, k, type, match, cur, cohort_, nullptr);
   }
 
   // Must hold lock.
@@ -2070,65 +2070,90 @@ class alignas(64) ConcurrentHashMapSegment {
 
   template <typename Key>
   ValueType insert_or_assign_and_get_old(
-      size_t h, Key&& k, ValueType new_value) {
+      size_t h,
+      Key&& k,
+      ValueType new_value,
+      Node** out_replaced_node) { // AE - 4/12 - Added output parameter
     // AE - 4/12 - Simplified implementation using insert_internal with out_replaced_node
 
     // Ensure ValueType is suitable for the sentinel.
-    static_assert(std::is_integral<ValueType>::value && sizeof(ValueType) == sizeof(uintptr_t),
-                  "ValueType must be uintptr_t or equivalent for insert_or_assign_and_get_old");
+    static_assert(
+        std::is_integral<ValueType>::value &&
+            sizeof(ValueType) == sizeof(uintptr_t),
+        "ValueType must be uintptr_t or equivalent for "
+        "insert_or_assign_and_get_old");
+
+    // AE - 4/12 - Initialize output parameter
+    if (out_replaced_node) {
+      *out_replaced_node = nullptr;
+    }
 
     // 1. Allocate the new node *before* calling insert_internal.
     Node* new_node = (Node*)Allocator().allocate(sizeof(Node));
-     try {
-        // Use KeyType constructor for potential conversions from Key&& k
-        new (new_node) Node(cohort_, KeyType(std::forward<Key>(k)), new_value);
+    try {
+      // Use KeyType constructor for potential conversions from Key&& k
+      new (new_node) Node(cohort_, KeyType(std::forward<Key>(k)), new_value);
     } catch (...) {
-        Allocator().deallocate((uint8_t*)new_node, sizeof(Node));
-        throw; // Re-throw allocation/constructor exception
+      Allocator().deallocate((uint8_t*)new_node, sizeof(Node));
+      throw; // Re-throw allocation/constructor exception
     }
 
-    Node* replaced_node = nullptr;
+    Node* local_replaced_node = nullptr; // Use a local variable first
     Iterator it; // Dummy iterator needed for insert_internal signature
 
     try {
-        // 2. Call the insert_internal overload that takes the pre-allocated node
-        //    and the address of replaced_node. This will call the underlying
-        //    table's insert method which uses the modified doInsert/equivalent.
-        /* bool success = */ // Not strictly needed, result determined by replaced_node
-         insert_internal(
-            it,
-            h,
-            new_node->getItem().first, // Key for lookup within insert_internal
-            InsertType::ANY,
-            [](const ValueType&) { return false; }, // Dummy MatchFunc for ANY
-            new_node,             // Pass the pre-allocated node
-            &replaced_node);      // Pass address to capture replaced node
+      // 2. Call the insert_internal overload that takes the pre-allocated node
+      //    and the address of local_replaced_node. This will call the
+      //    underlying table's insert method which uses the modified
+      //    doInsert/equivalent.
+      /* bool success = */ // Not strictly needed, result determined by replaced_node
+      insert_internal(
+          it,
+          h,
+          new_node->getItem().first, // Key for lookup within insert_internal
+          InsertType::ANY,
+          [](const ValueType&) { return false; }, // Dummy MatchFunc for ANY
+          new_node, // Pass the pre-allocated node
+          &local_replaced_node); // Pass address to capture replaced node locally
 
-        // 3. Check if a node was replaced
-        if (replaced_node) {
-            // Assignment occurred. Extract old value and release the replaced node.
-			// DO NOT release the node, the caller is now responsible for it's lifecycle
-            ValueType old_value = replaced_node->getItem().second;
-            return old_value;
+      // 3. Check if a node was replaced
+      if (local_replaced_node) {
+        // Assignment occurred. Extract old value.
+        ValueType old_value = local_replaced_node->getItem().second;
+        // AE - 4/12 - Assign to output parameter instead of releasing
+        if (out_replaced_node) {
+          *out_replaced_node = local_replaced_node;
         } else {
-            // Insertion occurred. new_node is now owned by the map.
-            return folly::kConcurrentHashMapNotFoundSentinel;
+          // If caller didn't provide the output param, we MUST release here
+          // to prevent a leak.
+          local_replaced_node->release();
         }
-     } catch (...) {
-        // If insert_internal throws (e.g., bad_alloc during rehash),
-        // we need to handle potential resource leaks.
-         if (replaced_node) {
-           // If replacement happened but an exception occurred *after*
-           // insert_internal returned but before we returned old_value. Unlikely.
-           // DO NOT release the node, the caller is now responsible for it's lifecycle
-         }
-         // If insert_internal failed mid-operation (e.g., rehash failed),
-         // the underlying doInsert/equivalent should ideally handle the cleanup
-         // of 'new_node' since it was passed in as 'cur'. If the exception
-         // occurred before ownership transfer, we might leak.
-         // Assuming the underlying insert handles cleanup on failure.
-        throw; // Re-throw the exception
-     }
+        return old_value;
+      } else {
+        // Insertion occurred. new_node is now owned by the map.
+        // replaced_node is already null, so *out_replaced_node remains null if provided.
+        return folly::kConcurrentHashMapNotFoundSentinel;
+      }
+    } catch (...) {
+      // If insert_internal throws (e.g., bad_alloc during rehash),
+      // we need to handle potential resource leaks.
+      if (local_replaced_node) {
+        // If replacement happened but an exception occurred *after*
+        // insert_internal returned but before we returned old_value. Unlikely.
+        // AE - 4/12 - Assign to output parameter instead of releasing
+        if (out_replaced_node) {
+          *out_replaced_node = local_replaced_node;
+        } else {
+          // Release if caller didn't provide the output param
+          local_replaced_node->release();
+        }
+      }
+      // If insert_internal failed mid-operation (e.g., rehash failed),
+      // the underlying doInsert/equivalent should ideally handle the cleanup
+      // of 'new_node' since it was passed in as 'cur'.
+      // Assuming the underlying insert handles cleanup on failure.
+      throw; // Re-throw the exception
+    }
   }
 
  private:
