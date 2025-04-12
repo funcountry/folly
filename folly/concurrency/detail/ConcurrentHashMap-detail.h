@@ -310,7 +310,15 @@ class alignas(64) BucketTable {
       Node** out_replaced_node,
       Args&&... args) {
     return doInsert(
-        it, h, k, type, match, nullptr, cohort, out_replaced_node, std::forward<Args>(args)...);
+        it,
+        h,
+        k,
+        type,
+        match,
+        nullptr,
+        cohort,
+        out_replaced_node,
+        std::forward<Args>(args)...);
   }
 
   template <typename MatchFunc, typename K, typename... Args>
@@ -322,7 +330,7 @@ class alignas(64) BucketTable {
       MatchFunc match,
       Node* cur,
       hazptr_obj_cohort<Atom>* cohort,
-	  Node** out_replaced_node) {
+      Node** out_replaced_node) {
     return doInsert(it, h, k, type, match, cur, cohort, out_replaced_node, cur);
   }
 
@@ -667,7 +675,7 @@ class alignas(64) BucketTable {
       MatchFunc match,
       Node* cur,
       hazptr_obj_cohort<Atom>* cohort,
-      Node** out_replaced_node = nullptr, // AE 4/12 - Added this parameter
+      Node** out_replaced_node, // AE 4/12 - Added this parameter
       Args&&... args) {
     // AE  - 4/12
     if (out_replaced_node) {
@@ -732,18 +740,18 @@ class alignas(64) BucketTable {
           it.setNode(cur, buckets, bcount, idx);
           haznode.reset_protection(cur);
 
-		  // AE - 4/12
-		  // Important only release the node if we DID NOT capture it
-		  // If we captured it, the caller is now responsible for it's lifecycle
+          // AE - 4/12
+          // Important only release the node if we DID NOT capture it
+          // If we captured it, the caller is now responsible for it's lifecycle
           // Release not under lock.
-		  if (!out_replaced_node) {
+          if (!out_replaced_node) {
             node->release();
           }
           g.unlock();
 
-		  // AE - 4/12
-		  // Otherwise the *out_replaced_node now holds the poitner to the old node
-		  // and the caller needs to handle its retirement / destruction
+          // AE - 4/12
+          // Otherwise the *out_replaced_node now holds the poitner to the old
+          // node and the caller needs to handle its retirement / destruction
           return true;
         }
       }
@@ -802,80 +810,6 @@ class alignas(64) BucketTable {
   Atom<size_t> bucket_count_;
 
  public: // <-- Add public access specifier here
-  // --- Implementation for insert_or_assign_and_get_old ---
-  template <typename Key>
-  ValueType insert_or_assign_and_get_old(
-      size_t h, Key&& k, ValueType new_value, hazptr_obj_cohort<Atom>* cohort) {
-    std::unique_lock<Mutex> g(m_);
-
-    size_t bcount = bucket_count_.load(std::memory_order_relaxed);
-    auto buckets = buckets_.load(std::memory_order_relaxed);
-
-    // Check for potential rehash needed before insertion
-    if (size() >= load_factor_nodes_) {
-      if (max_size_ && size() << 1 > max_size_) {
-        throw_exception<std::bad_alloc>(); // Would exceed max size
-      }
-      rehash(bcount << 1, cohort);
-      buckets = buckets_.load(std::memory_order_relaxed); // Reload after rehash
-      bcount = bucket_count_.load(std::memory_order_relaxed);
-    }
-
-    DCHECK(buckets) << "Use-after-destruction by user.";
-    auto idx = getIdx(bcount, h);
-    auto head = &buckets->buckets_[idx]();
-    auto node = head->load(std::memory_order_relaxed);
-    Node* prev_node_ptr =
-        nullptr; // Keep track of the previous node for replacement
-
-    while (node) {
-      if (KeyEqual()(k, node->getItem().first)) {
-        // Key found - perform assignment and return old value
-        ValueType old_value = node->getItem().second;
-
-        // Create the new node to replace the old one
-        auto new_node = (Node*)Allocator().allocate(sizeof(Node));
-        // Use the provided key `k` and the `new_value`
-        new (new_node) Node(cohort, std::forward<Key>(k), new_value);
-
-        // Link the new node into the chain
-        auto next_node = node->next_.load(std::memory_order_relaxed);
-        new_node->next_.store(next_node, std::memory_order_relaxed);
-        if (next_node) {
-          next_node->acquire_link(); // Acquire link for the next node
-        }
-
-        // Update the previous node's next pointer or the bucket head
-        if (prev_node_ptr) {
-          prev_node_ptr->next_.store(new_node, std::memory_order_release);
-        } else {
-          head->store(new_node, std::memory_order_release);
-        }
-
-        // Unlock before releasing the old node
-        g.unlock();
-        node->release(); // Retire the old node using hazptr
-
-        return old_value;
-      }
-      prev_node_ptr = node;
-      node = node->next_.load(std::memory_order_relaxed);
-    }
-
-    // Key not found - perform insertion and return sentinel
-    incSize();
-    auto new_node = (Node*)Allocator().allocate(sizeof(Node));
-    // Use the provided key `k` and the `new_value`
-    new (new_node) Node(cohort, std::forward<Key>(k), new_value);
-
-    // Insert at head
-    auto headnode = head->load(std::memory_order_relaxed);
-    new_node->next_.store(headnode, std::memory_order_relaxed);
-    head->store(new_node, std::memory_order_release);
-
-    // No need to unlock here as we are returning
-    return folly::kConcurrentHashMapNotFoundSentinel;
-  }
 }; // BucketTable
 
 } // namespace bucket
@@ -1733,13 +1667,6 @@ class alignas(64) SIMDTable {
   Atom<size_t> chunk_count_;
 
  public: // <-- Add public access specifier here
-  // --- Implementation for insert_or_assign_and_get_old ---
-  template <typename Key>
-  ValueType insert_or_assign_and_get_old(
-      size_t h, Key&& k, ValueType new_value, hazptr_obj_cohort<Atom>* cohort) {
-		// AE - 4/12 -  NOT IMPLEMENTED
-		throw std::runtime_error("insert_or_assign_and_get_old not implemented");
-  }
 }; // SIMDTable
 } // namespace simd
 
@@ -1943,6 +1870,31 @@ class alignas(64) ConcurrentHashMapSegment {
         [&expected](const ValueType& v) { return v == expected; });
   }
 
+template <typename MatchFunc, typename K> // MatchFunc is unused but keeps signature consistent
+bool insert_internal_atomic( // Give it a distinct name
+    Iterator& it,
+    size_t h,
+    const K& k,
+    InsertType type,
+    MatchFunc match, // Keep for signature consistency, though it's a dummy here
+    Node* cur, // The pre-allocated node
+    Node** out_replaced_node) // The pointer to capture the old node
+{
+    // Call the underlying table's insert, passing cur and out_replaced_node
+    // explicitly
+    return impl_.insert(
+        it,
+        h,
+        k,
+        type,
+        match, // Pass the dummy match function
+        cur, // Pass the pre-allocated node
+        cohort_,
+        out_replaced_node // Pass the pointer capture location correctly
+        // NO variadic arguments here
+    );
+  }
+
   template <typename MatchFunc, typename K, typename... Args>
   bool insert_internal(
       Iterator& it,
@@ -2017,23 +1969,13 @@ class alignas(64) ConcurrentHashMapSegment {
 
   template <typename Key>
   ValueType insert_or_assign_and_get_old(
-      size_t h,
-      Key&& k,
-      ValueType new_value,
-      Node** out_replaced_node) { // AE - 4/12 - Added output parameter
-    // AE - 4/12 - Simplified implementation using insert_internal with out_replaced_node
-
+      size_t h, Key&& k, ValueType new_value) {
     // Ensure ValueType is suitable for the sentinel.
     static_assert(
         std::is_integral<ValueType>::value &&
             sizeof(ValueType) == sizeof(uintptr_t),
         "ValueType must be uintptr_t or equivalent for "
         "insert_or_assign_and_get_old");
-
-    // AE - 4/12 - Initialize output parameter
-    if (out_replaced_node) {
-      *out_replaced_node = nullptr;
-    }
 
     // 1. Allocate the new node *before* calling insert_internal.
     Node* new_node = (Node*)Allocator().allocate(sizeof(Node));
@@ -2053,32 +1995,28 @@ class alignas(64) ConcurrentHashMapSegment {
       //    and the address of local_replaced_node. This will call the
       //    underlying table's insert method which uses the modified
       //    doInsert/equivalent.
-      /* bool success = */ // Not strictly needed, result determined by replaced_node
-      insert_internal(
+      /* bool success = */ // Not strictly needed, result determined by
+                           // replaced_node
+      insert_internal_atomic(
           it,
           h,
           new_node->getItem().first, // Key for lookup within insert_internal
           InsertType::ANY,
           [](const ValueType&) { return false; }, // Dummy MatchFunc for ANY
           new_node, // Pass the pre-allocated node
-          &local_replaced_node); // Pass address to capture replaced node locally
+          &local_replaced_node); // Pass address to capture replaced node
+                                 // locally
 
       // 3. Check if a node was replaced
       if (local_replaced_node) {
         // Assignment occurred. Extract old value.
         ValueType old_value = local_replaced_node->getItem().second;
         // AE - 4/12 - Assign to output parameter instead of releasing
-        if (out_replaced_node) {
-          *out_replaced_node = local_replaced_node;
-        } else {
-          // If caller didn't provide the output param, we MUST release here
-          // to prevent a leak.
-          local_replaced_node->release();
-        }
         return old_value;
       } else {
         // Insertion occurred. new_node is now owned by the map.
-        // replaced_node is already null, so *out_replaced_node remains null if provided.
+        // replaced_node is already null, so *out_replaced_node remains null if
+        // provided.
         return folly::kConcurrentHashMapNotFoundSentinel;
       }
     } catch (...) {
@@ -2088,12 +2026,7 @@ class alignas(64) ConcurrentHashMapSegment {
         // If replacement happened but an exception occurred *after*
         // insert_internal returned but before we returned old_value. Unlikely.
         // AE - 4/12 - Assign to output parameter instead of releasing
-        if (out_replaced_node) {
-          *out_replaced_node = local_replaced_node;
-        } else {
-          // Release if caller didn't provide the output param
-          local_replaced_node->release();
-        }
+        local_replaced_node->release();
       }
       // If insert_internal failed mid-operation (e.g., rehash failed),
       // the underlying doInsert/equivalent should ideally handle the cleanup

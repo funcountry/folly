@@ -604,7 +604,7 @@ class ConcurrentHashMap {
     // segment handles the release of the internal C++ node.
     return ensureSegment(segment_idx)
         ->insert_or_assign_and_get_old(
-            h, std::forward<Key>(k), new_value, nullptr);
+            h, std::forward<Key>(k), new_value);
   }
 
 
