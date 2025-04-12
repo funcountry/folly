@@ -21,6 +21,7 @@
 #include <mutex>
 #include <new>
 
+#include <folly/concurrency/detail/ConcurrentHashMapConstants.h> // Include the new header
 #include <folly/container/HeterogeneousAccess.h>
 #include <folly/container/detail/F14Mask.h>
 #include <folly/lang/Exception.h>
@@ -49,8 +50,7 @@ template <
     typename KeyType,
     typename ValueType,
     typename Allocator,
-    template <typename>
-    class Atom,
+    template <typename> class Atom,
     typename Enabled = void>
 class ValueHolder {
  public:
@@ -77,8 +77,7 @@ template <
     typename KeyType,
     typename ValueType,
     typename Allocator,
-    template <typename>
-    class Atom>
+    template <typename> class Atom>
 class ValueHolder<
     KeyType,
     ValueType,
@@ -308,9 +307,18 @@ class alignas(64) BucketTable {
       InsertType type,
       MatchFunc match,
       hazptr_obj_cohort<Atom>* cohort,
+      Node** out_replaced_node,
       Args&&... args) {
     return doInsert(
-        it, h, k, type, match, nullptr, cohort, std::forward<Args>(args)...);
+        it,
+        h,
+        k,
+        type,
+        match,
+        nullptr,
+        cohort,
+        out_replaced_node,
+        std::forward<Args>(args)...);
   }
 
   template <typename MatchFunc, typename K, typename... Args>
@@ -321,8 +329,9 @@ class alignas(64) BucketTable {
       InsertType type,
       MatchFunc match,
       Node* cur,
-      hazptr_obj_cohort<Atom>* cohort) {
-    return doInsert(it, h, k, type, match, cur, cohort, cur);
+      hazptr_obj_cohort<Atom>* cohort,
+      Node** out_replaced_node) {
+    return doInsert(it, h, k, type, match, cur, cohort, out_replaced_node, cur);
   }
 
   // Must hold lock.
@@ -666,12 +675,19 @@ class alignas(64) BucketTable {
       MatchFunc match,
       Node* cur,
       hazptr_obj_cohort<Atom>* cohort,
+      Node** out_replaced_node, // AE 4/12 - Added this parameter
       Args&&... args) {
+    // AE  - 4/12
+    if (out_replaced_node) {
+      *out_replaced_node = nullptr;
+    }
+
     std::unique_lock<Mutex> g(m_);
 
     size_t bcount = bucket_count_.load(std::memory_order_relaxed);
     auto buckets = buckets_.load(std::memory_order_relaxed);
     // Check for rehash needed for DOES_NOT_EXIST
+
     if (size() >= load_factor_nodes_ && type == InsertType::DOES_NOT_EXIST) {
       if (max_size_ && size() << 1 > max_size_) {
         // Would exceed max size.
@@ -713,12 +729,29 @@ class alignas(64) BucketTable {
           if (next) {
             next->acquire_link(); // defined in hazptr_obj_base_linked
           }
+
+          // --- AE - 4/12: Capture the node being replaced ---
+          if (out_replaced_node) {
+            *out_replaced_node = node; // Store the old node pointer
+          }
+          // --- End AE change ---
+
           prev->store(cur, std::memory_order_release);
           it.setNode(cur, buckets, bcount, idx);
           haznode.reset_protection(cur);
-          g.unlock();
+
+          // AE - 4/12
+          // Important only release the node if we DID NOT capture it
+          // If we captured it, the caller is now responsible for it's lifecycle
           // Release not under lock.
-          node->release();
+          if (!out_replaced_node) {
+            node->release();
+          }
+          g.unlock();
+
+          // AE - 4/12
+          // Otherwise the *out_replaced_node now holds the poitner to the old
+          // node and the caller needs to handle its retirement / destruction
           return true;
         }
       }
@@ -775,7 +808,9 @@ class alignas(64) BucketTable {
   alignas(64) Atom<Buckets*> buckets_{nullptr};
   std::atomic<uint64_t> seqlock_{0};
   Atom<size_t> bucket_count_;
-};
+
+ public: // <-- Add public access specifier here
+}; // BucketTable
 
 } // namespace bucket
 
@@ -1630,7 +1665,9 @@ class alignas(64) SIMDTable {
   alignas(64) Atom<Chunks*> chunks_{nullptr};
   std::atomic<uint64_t> seqlock_{0};
   Atom<size_t> chunk_count_;
-};
+
+ public: // <-- Add public access specifier here
+}; // SIMDTable
 } // namespace simd
 
 #endif // FOLLY_SSE_PREREQ(4, 2) && FOLLY_F14_VECTOR_INTRINSICS_AVAILABLE
@@ -1676,10 +1713,8 @@ template <
         typename,
         typename,
         typename,
-        template <typename>
-        class,
-        class>
-    class Impl = concurrenthashmap::bucket::BucketTable>
+        template <typename> class,
+        class> class Impl = concurrenthashmap::bucket::BucketTable>
 class alignas(64) ConcurrentHashMapSegment {
   using ImplT = Impl<
       KeyType,
@@ -1835,6 +1870,31 @@ class alignas(64) ConcurrentHashMapSegment {
         [&expected](const ValueType& v) { return v == expected; });
   }
 
+template <typename MatchFunc, typename K> // MatchFunc is unused but keeps signature consistent
+bool insert_internal_atomic( // Give it a distinct name
+    Iterator& it,
+    size_t h,
+    const K& k,
+    InsertType type,
+    MatchFunc match, // Keep for signature consistency, though it's a dummy here
+    Node* cur, // The pre-allocated node
+    Node** out_replaced_node) // The pointer to capture the old node
+{
+    // Call the underlying table's insert, passing cur and out_replaced_node
+    // explicitly
+    return impl_.insert(
+        it,
+        h,
+        k,
+        type,
+        match, // Pass the dummy match function
+        cur, // Pass the pre-allocated node
+        cohort_,
+        out_replaced_node // Pass the pointer capture location correctly
+        // NO variadic arguments here
+    );
+  }
+
   template <typename MatchFunc, typename K, typename... Args>
   bool insert_internal(
       Iterator& it,
@@ -1844,7 +1904,7 @@ class alignas(64) ConcurrentHashMapSegment {
       MatchFunc match,
       Args&&... args) {
     return impl_.insert(
-        it, h, k, type, match, cohort_, std::forward<Args>(args)...);
+        it, h, k, type, match, cohort_, nullptr, std::forward<Args>(args)...);
   }
 
   template <typename MatchFunc, typename K, typename... Args>
@@ -1855,7 +1915,7 @@ class alignas(64) ConcurrentHashMapSegment {
       InsertType type,
       MatchFunc match,
       Node* cur) {
-    return impl_.insert(it, h, k, type, match, cur, cohort_);
+    return impl_.insert(it, h, k, type, match, cur, cohort_, nullptr);
   }
 
   // Must hold lock.
@@ -1906,6 +1966,75 @@ class alignas(64) ConcurrentHashMapSegment {
   Iterator cbegin() { return impl_.cbegin(); }
 
   Iterator cend() { return impl_.cend(); }
+
+  template <typename Key>
+  ValueType insert_or_assign_and_get_old(
+      size_t h, Key&& k, ValueType new_value) {
+    // Ensure ValueType is suitable for the sentinel.
+    static_assert(
+        std::is_integral<ValueType>::value &&
+            sizeof(ValueType) == sizeof(uintptr_t),
+        "ValueType must be uintptr_t or equivalent for "
+        "insert_or_assign_and_get_old");
+
+    // 1. Allocate the new node *before* calling insert_internal.
+    Node* new_node = (Node*)Allocator().allocate(sizeof(Node));
+    try {
+      // Use KeyType constructor for potential conversions from Key&& k
+      new (new_node) Node(cohort_, KeyType(std::forward<Key>(k)), new_value);
+    } catch (...) {
+      Allocator().deallocate((uint8_t*)new_node, sizeof(Node));
+      throw; // Re-throw allocation/constructor exception
+    }
+
+    Node* local_replaced_node = nullptr; // Use a local variable first
+    Iterator it; // Dummy iterator needed for insert_internal signature
+
+    try {
+      // 2. Call the insert_internal overload that takes the pre-allocated node
+      //    and the address of local_replaced_node. This will call the
+      //    underlying table's insert method which uses the modified
+      //    doInsert/equivalent.
+      /* bool success = */ // Not strictly needed, result determined by
+                           // replaced_node
+      insert_internal_atomic(
+          it,
+          h,
+          new_node->getItem().first, // Key for lookup within insert_internal
+          InsertType::ANY,
+          [](const ValueType&) { return false; }, // Dummy MatchFunc for ANY
+          new_node, // Pass the pre-allocated node
+          &local_replaced_node); // Pass address to capture replaced node
+                                 // locally
+
+      // 3. Check if a node was replaced
+      if (local_replaced_node) {
+        // Assignment occurred. Extract old value.
+        ValueType old_value = local_replaced_node->getItem().second;
+        // AE - 4/12 - Assign to output parameter instead of releasing
+        return old_value;
+      } else {
+        // Insertion occurred. new_node is now owned by the map.
+        // replaced_node is already null, so *out_replaced_node remains null if
+        // provided.
+        return folly::kConcurrentHashMapNotFoundSentinel;
+      }
+    } catch (...) {
+      // If insert_internal throws (e.g., bad_alloc during rehash),
+      // we need to handle potential resource leaks.
+      if (local_replaced_node) {
+        // If replacement happened but an exception occurred *after*
+        // insert_internal returned but before we returned old_value. Unlikely.
+        // AE - 4/12 - Assign to output parameter instead of releasing
+        local_replaced_node->release();
+      }
+      // If insert_internal failed mid-operation (e.g., rehash failed),
+      // the underlying doInsert/equivalent should ideally handle the cleanup
+      // of 'new_node' since it was passed in as 'cur'.
+      // Assuming the underlying insert handles cleanup on failure.
+      throw; // Re-throw the exception
+    }
+  }
 
  private:
   ImplT impl_;

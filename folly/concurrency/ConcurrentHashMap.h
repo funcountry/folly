@@ -19,11 +19,17 @@
 #include <atomic>
 #include <mutex>
 
+// #include <limits> // No longer needed here directly
+#include <cstdint> // For uintptr_t usage in static_assert
+
 #include <folly/Optional.h>
 #include <folly/concurrency/detail/ConcurrentHashMap-detail.h>
+#include <folly/concurrency/detail/ConcurrentHashMapConstants.h> // Include the new header
 #include <folly/synchronization/Hazptr.h>
 
 namespace folly {
+
+// Sentinel definition moved to ConcurrentHashMapConstants.h
 
 /**
  * Implementations of high-performance Concurrent Hashmaps that
@@ -163,11 +169,15 @@ class ConcurrentHashMap {
 
   static constexpr uint64_t NumShards = (1 << ShardBits);
 
+
  public:
   class ConstIterator;
 
   typedef KeyType key_type;
-  typedef ValueType mapped_type;
+  // Ensure ValueType is uintptr_t for this specific use case if uncommented,
+  // otherwise trust the user is instantiating correctly.
+  // static_assert(std::is_same<ValueType, uintptr_t>::value, "ValueType must be uintptr_t for insert_or_assign_and_get_old");
+  typedef ValueType mapped_type; // Should be uintptr_t for the target use case
   typedef std::pair<const KeyType, ValueType> value_type;
   typedef std::size_t size_type;
   typedef HashFn hasher;
@@ -568,6 +578,36 @@ class ConcurrentHashMap {
     }
   }
 
+  /*
+   * Atomically assigns `new_value` to the key `k`.
+   * If the key already exists, its value is updated, and the *previous* value is returned.
+   * If the key does not exist, it is inserted, and kConcurrentHashMapNotFoundSentinel is returned.
+   *
+   * NOTE: This method assumes ValueType is uintptr_t or similar integral type
+   *       where kConcurrentHashMapNotFoundSentinel is a distinguishable invalid value.
+   *       The internal C++ Node object holding the old value is automatically
+   *       managed via hazard pointers when replacement occurs.
+   */
+  template <typename Key>
+  ValueType insert_or_assign_and_get_old(Key&& k, ValueType new_value) {
+    // Use SegmentT::Node to qualify the Node type correctly
+    static_assert(
+        std::is_integral<ValueType>::value &&
+            sizeof(ValueType) == sizeof(uintptr_t),
+        "ValueType must be uintptr_t or equivalent for "
+        "insert_or_assign_and_get_old");
+    auto h = HashFn{}(k);
+    auto segment_idx = pickSegment(h);
+    // Ensure the segment exists before calling its method.
+    // The segment method itself will handle the core logic including locking.
+    // AE - 4/12 - Pass nullptr for the Node** output parameter, ensuring the
+    // segment handles the release of the internal C++ node.
+    return ensureSegment(segment_idx)
+        ->insert_or_assign_and_get_old(
+            h, std::forward<Key>(k), new_value);
+  }
+
+
   class ConstIterator {
    public:
     friend class ConcurrentHashMap;
@@ -732,8 +772,9 @@ class ConcurrentHashMap {
     if (!seg) {
       auto b = ensureCohort();
       SegmentT* newseg = SegmentTAllocator().allocate(1);
+      // Pass the map's load factor and max size per segment
       newseg = new (newseg)
-          SegmentT(size_ >> ShardBits, load_factor_, max_size_ >> ShardBits, b);
+          SegmentT(size_ >> ShardBits, load_factor_, max_size_ == 0 ? 0 : max_size_ >> ShardBits, b);
       if (!segments_[i].compare_exchange_strong(seg, newseg)) {
         // seg is updated with new value, delete ours.
         newseg->~SegmentT();
